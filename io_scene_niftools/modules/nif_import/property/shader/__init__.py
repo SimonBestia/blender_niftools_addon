@@ -131,13 +131,14 @@ class BSShader(ABC):
     def create_material_name(self, bs_shader_property):
         name = block_store.import_name(bs_shader_property)
         if name is None:
-            name = (f"{self._n_block.name}_nt_mat")
+            name = (self._n_block.name.decode() + "_nt_mat")
         b_mat = bpy.data.materials.new(name)
         self._b_mesh.materials.append(b_mat)
         return b_mat
 
     @staticmethod
     def import_flags(b_mat, flags):
-        for name in type(flags).__members__:
-            if getattr(flags, name):
+        for name in flags._names:
+            sf_index = flags._names.index(name)
+            if flags._items[sf_index]._value == 1:
                 b_mat.niftools_shader[name] = True

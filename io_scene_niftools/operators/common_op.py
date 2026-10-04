@@ -37,13 +37,7 @@
 #
 # ***** END LICENSE BLOCK *****
 import bpy
-from itertools import chain
 
-from nifgen.formats.nif.versions import available_versions
-
-
-nif_extensions = list(set(chain.from_iterable([version.ext for version in available_versions if version.supported])))
-nif_glob = "*.jmi" + (f";*.{';*.'.join(nif_extensions)}" if nif_extensions else '')
 
 class CommonDevOperator:
     """Abstract base class for import and export user interface."""
@@ -112,7 +106,7 @@ class CommonNif:
 
     # File name filter for file select dialog.
     filter_glob: bpy.props.StringProperty(
-        default=nif_glob,
+        default="*.nif;*.item;*.nifcache;*.jmi",
         options={'HIDDEN'})
 
 

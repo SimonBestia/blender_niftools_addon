@@ -38,6 +38,8 @@
 # ***** END LICENSE BLOCK *****
 
 import bpy
+import mathutils
+from pyffi.formats.nif import NifFormat
 
 from io_scene_niftools.modules.nif_export import types
 from io_scene_niftools.modules.nif_export.animation.transform import TransformAnimation
@@ -95,26 +97,35 @@ class Object:
     def export_root_node(self, root_objects, filebase):
         """ Exports a nif's root node; use blender root if there is only one, else create a meta root """
         # TODO [collsion] detect root collision -> root collision node (can be mesh or empty)
-        #     self.export_collision(b_obj, n_parent)
+        #     self.nif_export.collisionhelper.export_collision(b_obj, n_parent)
         #     return None  # done; stop here
         self.n_root = None
         # there is only one root object so that will be our final root
         if len(root_objects) == 1:
             b_obj = root_objects[0]
-            self.export_node(b_obj, None, n_node_type=b_obj.niftools.nodetype)
+            self.export_node(b_obj, None)
 
         # there is more than one root object so we create a meta root
         else:
-            NifLog.info(f"Created meta root because blender scene had {len(root_objects)} root objects")
+            NifLog.info("Created meta root because blender scene had multiple root objects")
             self.n_root = types.create_ninode()
             self.n_root.name = "Scene Root"
             for b_obj in root_objects:
                 self.export_node(b_obj, self.n_root)
 
+        # TODO [object] How dow we know we are selecting the right node in the case of multi-root?
+        # making root block a fade node
+        root_type = b_obj.niftools.rootnode
+        if bpy.context.scene.niftools_scene.game in ('FALLOUT_3', 'SKYRIM') and root_type == 'BSFadeNode':
+            NifLog.info("Making root block a BSFadeNode")
+            fade_root_block = NifFormat.BSFadeNode().deepcopy(self.n_root)
+            fade_root_block.replace_global_node(self.n_root, fade_root_block)
+            self.n_root = fade_root_block
+
         # various extra datas
         object_property = ObjectDataProperty()
         object_property.export_bsxflags_upb(self.n_root, root_objects)
-        object_property.export_inventory_marker(self.n_root, b_obj)
+        object_property.export_inventory_marker(self.n_root, root_objects)
         object_property.export_weapon_location(self.n_root, b_obj)
         types.export_furniture_marker(self.n_root, filebase)
         return self.n_root
@@ -125,7 +136,7 @@ class Object:
         if b_obj.niftools.flags != 0:
             n_node.flags = b_obj.niftools.flags
         else:
-            if bpy.context.scene.niftools_scene.is_bs():
+            if game in ('OBLIVION', 'FALLOUT_3', 'SKYRIM'):
                 n_node.flags = 0x000E
             elif game in ('SID_MEIER_S_RAILROADS', 'CIVILIZATION_IV'):
                 n_node.flags = 0x0010
@@ -136,7 +147,7 @@ class Object:
             else:
                 n_node.flags = 0x000C  # morrowind
 
-    def export_node(self, b_obj, n_parent, n_node_type=None):
+    def export_node(self, b_obj, n_parent):
         """Export a mesh/armature/empty object b_obj as child of n_parent.
         Export also all children of b_obj.
 
@@ -169,6 +180,7 @@ class Object:
                     mesh = self.mesh_helper.export_tri_shapes(b_obj, n_parent, self.n_root, b_obj.name)
                     if not self.n_root:
                         self.n_root = mesh
+                    ObjectDataProperty().export_generic_extra_datas(mesh, b_obj)
                     return mesh
 
                 # set transform on trishapes rather than NiNodes for skinned meshes to fix an issue with clothing slots
@@ -179,7 +191,7 @@ class Object:
                     b_action = False
 
         # -> everything else (empty/armature) is a (more or less regular) node
-        node = types.create_ninode(b_obj, n_node_type=n_node_type)
+        node = types.create_ninode(b_obj)
         # set parenting here so that it can be accessed
         if not self.n_root:
             self.n_root = node
@@ -193,33 +205,37 @@ class Object:
         self.set_node_flags(b_obj, node)
         math.set_object_matrix(b_obj, node)
 
+        # export extra data for this node
+        ObjectDataProperty().export_generic_extra_datas(node, b_obj)
+
         # export object animation
         self.transform_anim.export_transforms(node, b_obj, b_action)
         self.object_anim.export_visibility(node, b_action)
-        # if it is a mesh, export the mesh as n_geom children of this ninode
+        # if it is a mesh, export the mesh as trishape children of this ninode
         if b_obj.type == 'MESH':
             return self.mesh_helper.export_tri_shapes(b_obj, node, self.n_root)
         # if it is an armature, export the bones as ninode children of this ninode
         elif b_obj.type == 'ARMATURE':
             self.armaturehelper.export_bones(b_obj, node)
-            # special case: objects parented to armature bones
-            for b_child in b_obj.children:
-                # find and attach to the right node
-                if b_child.parent_bone:
-                    b_obj_bone = b_obj.data.bones[b_child.parent_bone]
-                    # find the correct n_node
-                    # todo [object] this is essentially the same as Mesh.get_bone_block()
-                    n_node = [k for k, v in block_store.block_to_obj.items() if v == b_obj_bone][0]
-                    self.export_node(b_child, n_node)
-                # just child of the armature itself, so attach to armature root
-                else:
-                    self.export_node(b_child, node)
-        else:
-            # export all children of this empty object as children of this node
-            for b_child in b_obj.children:
-                self.export_node(b_child, node)
+
+        # export all children of this b_obj as children of this NiNode
+        self.export_children(b_obj, node)
 
         return node
+
+    def export_children(self, b_parent, n_parent):
+        """Export all children of blender object b_parent as children of n_parent."""
+        # loop over all obj's children
+        for b_child in b_parent.children:
+            temp_parent = n_parent
+            # special case: objects parented to armature bones - find the nif parent bone
+            if b_parent.type == 'ARMATURE' and b_child.parent_bone != "":
+                parent_bone = b_parent.data.bones[b_child.parent_bone]
+                assert (parent_bone in block_store.block_to_obj.values())
+                for temp_parent, obj in block_store.block_to_obj.items():
+                    if obj == parent_bone:
+                        break
+            self.export_node(b_child, temp_parent)
 
     def export_collision(self, b_obj, n_parent):
         """Main function for adding collision object b_obj to a node.
@@ -234,7 +250,7 @@ class Object:
         elif b_obj.name.lower().startswith("bounding box"):
             # Morrowind bounding box
             self.bs_helper.export_bounds(b_obj, n_parent, bsbound=False)
-        if bpy.context.scene.niftools_scene.is_bs():
+        if bpy.context.scene.niftools_scene.game in ('OBLIVION', 'FALLOUT_3', 'SKYRIM'):
 
             nodes = [n_parent]
             nodes.extend([block for block in n_parent.children if block.name[:14] == 'collisiondummy'])
@@ -247,7 +263,7 @@ class Object:
             else:
                 # all nodes failed so add new one
                 node = types.create_ninode(b_obj)
-                node.name = f'collisiondummy{n_parent.num_children}'
+                node.name = 'collisiondummy{:d}'.format(n_parent.num_children)
                 if b_obj.niftools.flags != 0:
                     node_flag_hex = hex(b_obj.niftools.flags)
                 else:

@@ -40,20 +40,19 @@
 import os.path
 
 import bpy
-from nifgen.formats.nif import classes as NifClasses
+from pyffi.formats.nif import NifFormat
 
 import io_scene_niftools.utils.logging
 from io_scene_niftools.modules.nif_export.block_registry import block_store
 from io_scene_niftools.utils import math
 from io_scene_niftools.utils.singleton import NifOp
 from io_scene_niftools.utils.logging import NifLog
-from io_scene_niftools.utils.singleton import NifData
 
 
 class TextureWriter:
 
     @staticmethod
-    def export_source_texture(n_texture=None, filename=None):
+    def export_source_texture(n_texture=None, filename=None, is_cube_map=False):
         """Export a NiSourceTexture.
 
         :param n_texture: The n_texture object in blender to be exported.
@@ -64,8 +63,11 @@ class TextureWriter:
         :return: The exported NiSourceTexture block.
         """
 
-        # create NiSourceTexture
-        srctex = NifClasses.NiSourceTexture(NifData.data)
+        # create NiSourceTexture or NiSourceCubeMap
+        if is_cube_map:
+            srctex = NifFormat.NiSourceCubeMap()
+        else:
+            srctex = NifFormat.NiSourceTexture()
         srctex.use_external = True
         if filename is not None:
             # preset filename
@@ -87,7 +89,7 @@ class TextureWriter:
 
         # search for duplicate
         for block in block_store.block_to_obj:
-            if isinstance(block, NifClasses.NiSourceTexture) and block.get_hash() == srctex.get_hash():
+            if isinstance(block, type(srctex)) and block.get_hash() == srctex.get_hash():
                 return block
 
         # no identical source texture found, so use and register the new one
@@ -106,7 +108,7 @@ class TextureWriter:
         @return: The file name of the image used in the b_texture_node.
         """
 
-        if not isinstance(b_texture_node, bpy.types.ShaderNodeTexImage):
+        if not isinstance(b_texture_node, (bpy.types.ShaderNodeTexImage, bpy.types.ShaderNodeTexEnvironment)):
             raise io_scene_niftools.utils.logging.NifError(f"Expected a Shader node texture, got {type(b_texture_node)}")
         # get filename from image
 
@@ -117,18 +119,21 @@ class TextureWriter:
 
         filename = b_texture_node.image.filepath
 
+        if not filename:
+            filename = b_texture_node.image.name
+
         # warn if packed flag is enabled
         if b_texture_node.image.packed_file:
             NifLog.warn(f"Packed image in texture '{b_texture_node.name}' ignored, exporting as '{filename}' instead.")
 
         # try and find a DDS alternative, force it if required
-        ddsfilename = f"{(filename[:-4])}.dds"
+        name_no_ext, _ = os.path.splitext(filename)
+        ddsfilename = f"{name_no_ext}.dds"
         if os.path.exists(bpy.path.abspath(ddsfilename)) or NifOp.props.force_dds:
             filename = ddsfilename
 
         # sanitize file path
-        nif_scene = bpy.context.scene.niftools_scene
-        if not (nif_scene.is_bs() or nif_scene.game in ('MORROWIND',)):
+        if bpy.context.scene.niftools_scene.game not in ('MORROWIND', 'OBLIVION', 'FALLOUT_3', 'SKYRIM'):
             # strip b_texture_node file path
             filename = os.path.basename(filename)
 

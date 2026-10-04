@@ -62,6 +62,8 @@ UPB_DEFAULT = 'Mass = 0.000000\r\nEllasticity = 0.300000\r\nFriction = 0.300000\
 FLOAT_MIN = -3.4028234663852886e+38
 FLOAT_MAX = +3.4028234663852886e+38
 
+HAVOK_SCALE = 6.996
+
 VERTEX_RESOLUTION = 1000
 NORMAL_RESOLUTION = 100
 
@@ -85,9 +87,3 @@ TEX_SLOTS.DECAL_1 = "Decal 1"
 TEX_SLOTS.DECAL_2 = "Decal 2"
 TEX_SLOTS.SPECULAR = "Specular"
 TEX_SLOTS.NORMAL = "Normal"
-
-# fcurve data types for blender
-QUAT = "rotation_quaternion"
-EULER = "rotation_euler"
-LOC = "location"
-SCALE = "scale"

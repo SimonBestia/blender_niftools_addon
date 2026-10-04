@@ -36,7 +36,7 @@
 # POSSIBILITY OF SUCH DAMAGE.
 #
 # ***** END LICENSE BLOCK *****
-from nifgen.formats.nif import classes as NifClasses
+from pyffi.formats.nif import NifFormat
 
 from io_scene_niftools.modules.nif_import.collision import Collision
 from io_scene_niftools.modules.nif_import.object import Object
@@ -68,33 +68,30 @@ class Bound(Collision):
 
     def import_bounding_box(self, n_block):
         """Import a NiNode's bounding box or attached BSBound extra data."""
-        if not n_block or not isinstance(n_block, NifClasses.NiNode):
+        if not n_block or not isinstance(n_block, NifFormat.NiNode):
             return []
         # we have a ninode with bounding box
-        if n_block.has_bounding_volume:
-            b_name = 'Bounding Volume'
+        if n_block.has_bounding_box:
+            b_name = 'Bounding Box'
 
-            if n_block.bounding_volume.collision_type == NifClasses.BoundVolumeType.BOX_BV:
-                # Ninode's bbox behaves like a seperate mesh.
-                # bounding_box center(n_block.bounding_box.translation) is relative to the bound_box
-                n_bl_trans = n_block.translation
-                n_bbox = n_block.bounding_volume.box
-                n_b_trans = n_bbox.translation
-                minx = n_b_trans.x - n_bl_trans.x - n_bbox.radius.x
-                miny = n_b_trans.y - n_bl_trans.y - n_bbox.radius.y
-                minz = n_b_trans.z - n_bl_trans.z - n_bbox.radius.z
-                maxx = n_b_trans.x - n_bl_trans.x + n_bbox.radius.x
-                maxy = n_b_trans.y - n_bl_trans.y + n_bbox.radius.y
-                maxz = n_b_trans.z - n_bl_trans.z + n_bbox.radius.z
-                bbox_center = n_b_trans.as_list()
-            else:
-                raise NotImplementedError("Non-box bounding volume are not yet supported.")
+            # Ninode's bbox behaves like a seperate mesh.
+            # bounding_box center(n_block.bounding_box.translation) is relative to the bound_box
+            n_bl_trans = n_block.translation
+            n_bbox = n_block.bounding_box
+            n_b_trans = n_bbox.translation
+            minx = n_b_trans.x - n_bl_trans.x - n_bbox.radius.x
+            miny = n_b_trans.y - n_bl_trans.y - n_bbox.radius.y
+            minz = n_b_trans.z - n_bl_trans.z - n_bbox.radius.z
+            maxx = n_b_trans.x - n_bl_trans.x + n_bbox.radius.x
+            maxy = n_b_trans.y - n_bl_trans.y + n_bbox.radius.y
+            maxz = n_b_trans.z - n_bl_trans.z + n_bbox.radius.z
+            bbox_center = n_b_trans.as_list()
 
         # we may still have a BSBound extra data attached to this node
         else:
             for n_extra in n_block.get_extra_datas():
                 # TODO [extra][data] Move to property processor
-                if isinstance(n_extra, NifClasses.BSBound):
+                if isinstance(n_extra, NifFormat.BSBound):
                     b_name = 'BSBound'
                     center = n_extra.center
                     dims = n_extra.dimensions
@@ -141,8 +138,9 @@ class Bound(Collision):
         offset = capsule.center
         # always a normalized vector
         direction = capsule.origin
-        extent = capsule.extent
-        radius = capsule.radius
+        # nb properly named in newer nif.xmls
+        extent = capsule.unknown_float_1
+        radius = capsule.unknown_float_2
 
         # positions of the box verts
         minx = miny = -radius

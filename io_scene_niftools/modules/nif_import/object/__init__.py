@@ -38,7 +38,7 @@
 # ***** END LICENSE BLOCK *****
 
 import bpy
-from nifgen.formats.nif import classes as NifClasses
+from pyffi.formats.nif import NifFormat
 
 from io_scene_niftools.modules.nif_import.geometry.mesh import Mesh
 from io_scene_niftools.modules.nif_import.object.block_registry import block_store
@@ -110,7 +110,7 @@ class Object:
             raise RuntimeError(f"Unexpected object type {b_obj.__class__:s}")
 
     def create_mesh_object(self, n_block):
-        ni_name = n_block.name
+        ni_name = n_block.name.decode()
         # create mesh data
         b_mesh = bpy.data.meshes.new(ni_name)
 
@@ -125,9 +125,6 @@ class Object:
 
         return b_obj
 
-    def has_geometry(self, n_block):
-        return isinstance(n_block, self.mesh.supported_mesh_types)
-
     def import_geometry_object(self, b_armature, n_block):
         # it's a shape node and we're not importing skeleton only
         b_obj = self.create_mesh_object(n_block)
@@ -137,8 +134,12 @@ class Object:
         # store flags etc
         self.import_object_flags(n_block, b_obj)
         # skinning? add armature modifier
-        if n_block.is_skin():
+        if n_block.skin_instance:
             self.append_armature_modifier(b_obj, b_armature)
+            
+        from io_scene_niftools.modules.nif_import.property.object import ObjectProperty
+        ObjectProperty().import_generic_extra_datas(n_block, b_obj)
+        
         return b_obj
 
     # TODO [object][property] Replace with object level property processing
@@ -147,9 +148,10 @@ class Object:
         """ Various settings in b_obj's niftools panel """
         b_obj.niftools.flags = n_block.flags
 
-        if hasattr(n_block, "data") and isinstance(n_block.data.consistency_flags, NifClasses.ConsistencyType):
-            b_obj.niftools.consistency_flags = n_block.data.consistency_flags.name
-        if n_block.is_skin() and hasattr(n_block, "skin_instance"):
+        if n_block.data.consistency_flags in NifFormat.ConsistencyType._enumvalues:
+            cf_index = NifFormat.ConsistencyType._enumvalues.index(n_block.data.consistency_flags)
+            b_obj.niftools.consistency_flags = NifFormat.ConsistencyType._enumkeys[cf_index]
+        if n_block.is_skin():
             skininst = n_block.skin_instance
             skelroot = skininst.skeleton_root
             b_obj.niftools.skeleton_root = block_store.import_name(skelroot)

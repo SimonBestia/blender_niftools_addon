@@ -40,11 +40,12 @@
 
 import bpy
 
-from nifgen.formats.nif import classes as NifClasses
+from pyffi.formats.nif import NifFormat
 
 from io_scene_niftools.modules.nif_export.property.material import MaterialProp
 from io_scene_niftools.modules.nif_export.property.shader import BSShaderProperty
 from io_scene_niftools.modules.nif_export.property.texture.types.nitextureprop import NiTextureProp
+from io_scene_niftools.properties.object import PRN_DICT
 from io_scene_niftools.modules.nif_export.block_registry import block_store
 from io_scene_niftools.utils.consts import UPB_DEFAULT
 from io_scene_niftools.utils.singleton import NifOp
@@ -75,17 +76,18 @@ class ObjectProperty:
 
             # todo [property] refactor this
             # add textures
-            if bpy.context.scene.niftools_scene.is_fo3():
+            if bpy.context.scene.niftools_scene.game == 'FALLOUT_3':
                 bsshader = self.bss_helper.export_bs_shader_property(b_mat)
 
                 block_store.register_block(bsshader)
                 n_block.add_property(bsshader)
-            elif bpy.context.scene.niftools_scene.is_skyrim():
+            elif bpy.context.scene.niftools_scene.game == 'SKYRIM':
                 bsshader = self.bss_helper.export_bs_shader_property(b_mat)
 
                 block_store.register_block(bsshader)
                 # TODO [pyffi] Add helper function to allow adding bs_property / general list addition
-                n_block.shader_property = bsshader
+                n_block.bs_properties[0] = bsshader
+                n_block.bs_properties.update_size()
 
             else:
                 if bpy.context.scene.niftools_scene.game in self.texture_helper.USED_EXTRA_SHADER_TEXTURES:
@@ -100,6 +102,10 @@ class ObjectProperty:
 
                 block_store.register_block(n_nitextureprop)
                 n_block.add_property(n_nitextureprop)
+
+            if bpy.context.scene.niftools_scene.game == 'BULLY_SE':
+                n_nivertexcolorprop = self.export_vertex_color_property(flags=40)
+                n_block.add_property(n_nivertexcolorprop)
 
     def get_matching_block(self, block_type, **kwargs):
         """Try to find a block matching block_type. Keyword arguments are a dict of parameters and required attributes of the block"""
@@ -135,6 +141,9 @@ class ObjectProperty:
         props = []
         if bpy.context.scene.niftools_scene.game in ('CIVILIZATION_IV', 'SID_MEIER_S_RAILROADS', 'EMPIRE_EARTH_II', 'ZOO_TYCOON_2'):
             props.append(self.export_vertex_color_property())
+            props.append(self.export_z_buffer_property())
+        elif bpy.context.scene.niftools_scene.game == 'BULLY_SE':
+            props.append(self.export_vertex_color_property(flags=8))
             props.append(self.export_z_buffer_property())
         # todo [property] move other common properties into this function
         # attach properties to root node
@@ -177,15 +186,48 @@ class ObjectProperty:
     def export_specular_property(self, b_mat, flags=0x0001):
         """Return existing specular property with given flags, or create new one
         if a specular property with required flags is not found."""
+        
+        if b_mat and bpy.context.scene.niftools_scene.game == 'BULLY_SE':
+            has_specular = False
+            if b_mat.use_nodes and b_mat.node_tree:
+                for node in b_mat.node_tree.nodes:
+                    if node.type in ('TEX_IMAGE', 'ENVIRONMENT') and hasattr(node, 'image') and node.image:
+                        img_name = node.image.name.lower()
+                        if getattr(node.image, 'filepath', ''):
+                            img_name += node.image.filepath.lower()
+                        if '_s.' in img_name or 'specular' in img_name or '_s_' in img_name or (img_name.endswith('_s')):
+                            has_specular = True
+                            break
+            if not has_specular:
+                return None
+
         # search for duplicate
-        if b_mat and not (bpy.context.scene.niftools_scene.is_skyrim()):
+        if b_mat and not (bpy.context.scene.niftools_scene.game == 'SKYRIM'):
             # add NiTriShape's specular property
             # but NOT for sid meier's railroads and other extra shader
             # games (they use specularity even without this property)
             if bpy.context.scene.niftools_scene.game in self.texture_helper.USED_EXTRA_SHADER_TEXTURES:
                 return
             eps = NifOp.props.epsilon
-            if (b_mat.specular_color.r > eps) or (b_mat.specular_color.g > eps) or (b_mat.specular_color.b > eps):
+            
+            spec_r, spec_g, spec_b = b_mat.specular_color
+            if b_mat.use_nodes and b_mat.node_tree:
+                for node in b_mat.node_tree.nodes:
+                    if node.type == 'BSDF_PRINCIPLED':
+                        spec_socket = node.inputs.get('Specular')
+                        if spec_socket:
+                            if spec_socket.is_linked:
+                                intensity = 1.0
+                            else:
+                                if bpy.context.scene.niftools_scene.game == 'BULLY_SE':
+                                    return None
+                                intensity = spec_socket.default_value
+                            spec_r *= intensity
+                            spec_g *= intensity
+                            spec_b *= intensity
+                        break
+                        
+            if (spec_r > eps) or (spec_g > eps) or (spec_b > eps):
                 return self.get_matching_block("NiSpecularProperty", flags=flags)
 
     def export_wireframe_property(self, b_obj, flags=0x0001):
@@ -201,7 +243,7 @@ class ObjectProperty:
         # no stencil property
         if b_mat.use_backface_culling:
             return
-        if bpy.context.scene.niftools_scene.is_fo3():
+        if bpy.context.scene.niftools_scene.game == 'FALLOUT_3':
             flags = 19840
         # search for duplicate
         return self.get_matching_block("NiStencilProperty", flags=flags)
@@ -219,29 +261,33 @@ class ObjectDataProperty:
 
     # TODO [object][property] Move to object property
     @staticmethod
-    def export_inventory_marker(n_root, b_obj):
-        """Attaches a BSInvMarker to n_root if desired and fill in its values"""
-        niftools_scene = bpy.context.scene.niftools_scene
-        bs_inv_store = b_obj.niftools.bs_inv
-        if niftools_scene.is_skyrim() and bs_inv_store:
-            bs_inv = bs_inv_store[0]
-            n_bs_inv_marker = NifClasses.BSInvMarker(n_root.context)
-            n_bs_inv_marker.name = bs_inv.name
-            n_bs_inv_marker.rotation_x = round((-bs_inv.x % (2 * pi)) * 1000)
-            n_bs_inv_marker.rotation_y = round((-bs_inv.y % (2 * pi)) * 1000)
-            n_bs_inv_marker.rotation_z = round((-bs_inv.z % (2 * pi)) * 1000)
-            n_bs_inv_marker.zoom = bs_inv.zoom
-            n_root.add_extra_data(n_bs_inv_marker)
+    def export_inventory_marker(n_root, root_objects):
+        if bpy.context.scene.niftools_scene.game in ('SKYRIM',):
+            for root_object in root_objects:
+                if root_object.niftools_bs_invmarker:
+                    for extra_item in n_root.extra_data_list:
+                        if isinstance(extra_item, NifFormat.BSInvMarker):
+                            raise NifError("Multiple Items have Inventory marker data only one item may contain this data")
+                    else:
+                        n_extra_list = NifFormat.BSInvMarker()
+                        n_extra_list.name = root_object.niftools_bs_invmarker[0].name.encode()
+                        n_extra_list.rotation_x = (-root_object.niftools_bs_invmarker[0].bs_inv_x % (2 * pi)) * 1000
+                        n_extra_list.rotation_y = (-root_object.niftools_bs_invmarker[0].bs_inv_y % (2 * pi)) * 1000
+                        n_extra_list.rotation_z = (-root_object.niftools_bs_invmarker[0].bs_inv_z % (2 * pi)) * 1000
+                        n_extra_list.zoom = root_object.niftools_bs_invmarker[0].bs_inv_zoom
+                        n_root.add_extra_data(n_extra_list)
 
     # TODO [object][property] Move to new object type
     def export_weapon_location(self, n_root, root_obj):
         # export weapon location
-        if bpy.context.scene.niftools_scene.is_bs():
+        game = bpy.context.scene.niftools_scene.game
+        if game in ('OBLIVION', 'FALLOUT_3', 'SKYRIM'):
             loc = root_obj.niftools.prn_location
-            if loc:
+            if loc != "NONE" and (PRN_DICT[loc][game] is not None):
+                # add string extra data
                 prn = block_store.create_block("NiStringExtraData")
                 prn.name = 'Prn'
-                prn.string_data = loc
+                prn.string_data = PRN_DICT[loc][game]
                 n_root.add_extra_data(prn)
 
     # TODO [object][property] Move to object property
@@ -249,7 +295,7 @@ class ObjectDataProperty:
         # TODO [object][property] Fixme
         NifLog.info("Checking collision")
         # activate oblivion/Fallout 3 collision and physics
-        if bpy.context.scene.niftools_scene.is_bs():
+        if bpy.context.scene.niftools_scene.game in ('OBLIVION', 'FALLOUT_3', 'SKYRIM'):
             b_obj = self.has_collision()
             if b_obj:
                 # enable collision
@@ -275,3 +321,12 @@ class ObjectDataProperty:
                     else:
                         upb.string_data = b_obj.niftools.upb.encode()
                     root_block.add_extra_data(upb)
+
+    def export_generic_extra_datas(self, n_block, b_obj):
+        if hasattr(b_obj, "niftools") and hasattr(b_obj.niftools, "extra_data_store"):
+            for extra in b_obj.niftools.extra_data_store.extra_data:
+                if extra.sub_class == "NiStringExtraData":
+                    n_extra = block_store.create_block("NiStringExtraData")
+                    n_extra.name = extra.name.encode('utf-8')
+                    n_extra.string_data = extra.data.encode('utf-8')
+                    n_block.add_extra_data(n_extra)

@@ -37,7 +37,7 @@
 #
 # ***** END LICENSE BLOCK *****
 
-from nifgen.formats.nif import classes as NifClasses
+from pyffi.formats.nif import NifFormat
 from pyffi.formats.egm import EgmFormat
 
 from io_scene_niftools.modules.nif_export.animation import Animation
@@ -55,11 +55,10 @@ class MorphAnimation(Animation):
         EGMData.data = None
 
     def export_morph(self, b_mesh, n_trishape, vertmap):
-        NifLog.debug(f"Checking {b_mesh.name} for shape keys")
-        # shape keys are only present on non-evaluated meshes!
+        # shape b_key morphing
         b_key = b_mesh.shape_keys
         if b_key and len(b_key.key_blocks) > 1:
-            NifLog.debug(f"{b_mesh.name} has shape keys")
+            
             # yes, there is a b_key object attached
             # export as egm, or as morph_data?
             if b_key.key_blocks[1].name.startswith("EGM"):
@@ -101,25 +100,25 @@ class MorphAnimation(Animation):
         morph_ctrl.data = morph_data
         morph_data.num_morphs = len(b_key.key_blocks)
         morph_data.num_vertices = n_trishape.data.num_vertices
-        morph_data.reset_field("morphs")
+        morph_data.morphs.update_size()
 
         # create interpolators (for newer nif versions)
         morph_ctrl.num_interpolators = len(b_key.key_blocks)
-        morph_ctrl.reset_field("interpolators")
+        morph_ctrl.interpolators.update_size()
 
         # interpolator weights (for Fallout 3)
-        morph_ctrl.reset_field("interpolator_weights")
+        morph_ctrl.interpolator_weights.update_size()
         # TODO [morph] some unknowns, bethesda only
         # TODO [morph] just guessing here, data seems to be zero always
         morph_ctrl.num_unknown_ints = len(b_key.key_blocks)
-        morph_ctrl.reset_field("unknown_ints")
+        morph_ctrl.unknown_ints.update_size()
         for key_block_num, key_block in enumerate(b_key.key_blocks):
             # export morphed vertices
             n_morph = morph_data.morphs[key_block_num]
             n_morph.frame_name = key_block.name
             NifLog.info(f"Exporting n_morph {key_block.name}: vertices")
             n_morph.arg = morph_data.num_vertices
-            n_morph.reset_field("vectors")
+            n_morph.vectors.update_size()
             for b_v_index, (n_v_indices, b_vert) in enumerate(list(zip(vertmap, key_block.data))):
                 # see if this b_vert is used in the nif
                 if not n_v_indices:
@@ -140,7 +139,6 @@ class MorphAnimation(Animation):
             # create interpolator for shape b_key (needs to be there even if there is no fcu)
             interpol = block_store.create_block("NiFloatInterpolator")
             interpol.value = 0
-            # [TODO] condition this - only qualifying fields will have been reset to the correct size
             morph_ctrl.interpolators[key_block_num] = interpol
 
             # fallout 3 stores interpolators inside the interpolator_weights block
@@ -162,9 +160,9 @@ class MorphAnimation(Animation):
             # note: we set data on n_morph for older nifs and on floatdata for newer nifs
             # of course only one of these will be actually written to the file
             for n_data in (n_morph, n_floatdata):
-                n_data.interpolation = NifClasses.KeyType.LINEAR_KEY
+                n_data.interpolation = NifFormat.KeyType.LINEAR_KEY
                 n_data.num_keys = len(fcurves[0].keyframe_points)
-                n_data.reset_field("keys")
+                n_data.keys.update_size()
 
             for i, b_keyframe in enumerate(fcurves[0].keyframe_points):
                 frame, value = b_keyframe.co

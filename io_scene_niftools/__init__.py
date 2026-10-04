@@ -47,12 +47,12 @@ from io_scene_niftools.utils.decorators import register_modules, unregister_modu
 bl_info = {
     "name": "NetImmerse/Gamebryo format support",
     "description": "Import and export files in the NetImmerse/Gamebryo formats (.nif, .kf, .egm)",
-    "author": "Niftools team",
+    "author": "Niftools team - SIMONBESTIA's CRAPPY VIBECODED BRANCH",
     "blender": (2, 82, 0),
-    "version": (0, 1, 1),  # can't read from VERSION, blender wants it hardcoded
+    "version": (0, 0, 14),  # can't read from VERSION, blender wants it hardcoded
     "api": 39257,
     "location": "File > Import-Export",
-    "warning": "Generally stable port of the Niftool's Blender NifScripts, many improvements, still work in progress",
+    "warning": "Generally stable port of the Niftool's Blender NifScripts, many improvements, still work in progress (VIBECODED FIXES TO WORK BETTER WITH BULLY: SCHOLARSHIP EDITION)",
     "wiki_url": "https://blender-niftools-addon.readthedocs.io/",
     "tracker_url": "https://github.com/niftools/blender_niftools_addon/issues",
     "support": "COMMUNITY",
@@ -72,8 +72,8 @@ def locate_dependencies():
 
     with open(os.path.join(current_dir, "VERSION.txt")) as version:
         NifLog.info(f"Loading: Blender Niftools Addon: {version.read()}")
-        import nifgen.formats.nif as NifFormat
-        NifLog.info(f"Loading: NifFormat: {NifFormat.__xml_version__}") # todo [generated] update this and library to have actual versioning
+        import pyffi
+        NifLog.info(f"Loading: PyFFi: {pyffi.__version__}")
 
 
 locate_dependencies()

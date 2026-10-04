@@ -44,6 +44,9 @@ import itertools
 
 from io_scene_niftools.modules.nif_import.property.geometry.niproperty import NiPropertyProcessor
 from io_scene_niftools.modules.nif_import.property.nodes_wrapper import NodesWrapper
+from io_scene_niftools.modules.nif_import.property.texture.loader import TextureLoader
+from io_scene_niftools.utils.singleton import NifData
+from pyffi.formats.nif import NifFormat
 from io_scene_niftools.modules.nif_import.property.shader.bsshaderlightingproperty import BSShaderLightingPropertyProcessor
 from io_scene_niftools.modules.nif_import.property.shader.bsshaderproperty import BSShaderPropertyProcessor
 from io_scene_niftools.utils.logging import NifLog
@@ -59,6 +62,7 @@ class MeshPropertyProcessor:
             BSShaderPropertyProcessor.get(),
             BSShaderLightingPropertyProcessor.get()
         )
+        self.material_cache = {}
 
         # Register processors
         self.process_property = singledispatch(self.process_property)
@@ -69,29 +73,35 @@ class MeshPropertyProcessor:
         b_mesh = b_obj.data
 
         # get all valid properties that are attached to n_block
-        bs_properties = [getattr(n_block, prop_name, None) for prop_name in ("shader_property", "alpha_property")]
-        props = list(prop for prop in itertools.chain(n_block.properties, bs_properties) if prop is not None)
+        props = list(prop for prop in itertools.chain(n_block.properties, n_block.bs_properties) if prop is not None)
 
         # we need no material if we have no properties
         if not props:
             return
 
+        # tuple of memory addresses of the NIF blocks uniquely identifies this material setup!
+        prop_hash = tuple(id(prop) for prop in props)
+        
+        if prop_hash in self.material_cache:
+            b_mat = self.material_cache[prop_hash]
+            NifLog.debug(f"Retrieved cached material {b_mat.name} for identical property blocks")
+            b_mesh.materials.append(b_mat)
+            return
+
         # just to avoid duped materials, a first pass, make sure a named material is created or retrieved
         for prop in props:
             if prop.name:
-                name = prop.name
-                if name and name in bpy.data.materials:
-                    b_mat = bpy.data.materials[name]
-                    NifLog.debug(f"Retrieved already imported material {b_mat.name} from name {name}")
-                else:
-                    b_mat = bpy.data.materials.new(name)
-                    NifLog.debug(f"Created material {name} to store properties in {b_mat.name}")
+                name = prop.name.decode()
+                b_mat = bpy.data.materials.new(name)
+                NifLog.debug(f"Created material {name} to store properties in {b_mat.name}")
                 break
         else:
             # bs shaders often have no name, so generate one from mesh name
-            name = f"{n_block.name}_nt_mat"
+            name = n_block.name.decode() + "_nt_mat"
             b_mat = bpy.data.materials.new(name)
             NifLog.debug(f"Created material {name} to store properties in {b_mat.name}")
+            
+        self.material_cache[prop_hash] = b_mat
 
         # do initial settings for the material here
         self.nodes_wrapper.b_mat = b_mat
@@ -112,6 +122,37 @@ class MeshPropertyProcessor:
         for prop in props:
             NifLog.debug(f"{type(prop)} property found")
             self.process_property(prop)
+            
+        # Check for NiTextureEffect (Environment maps)
+        texture_effect = None
+        parent_node = None
+        if hasattr(NifData, 'data') and NifData.data and NifData.data.roots:
+            for block in NifData.data.roots[0].tree():
+                if isinstance(block, NifFormat.NiNode) and n_block in block.children:
+                    parent_node = block
+                    break
+
+        if parent_node:
+            lastchild = None
+            for child in parent_node.children:
+                if child is n_block:
+                    if isinstance(lastchild, NifFormat.NiTextureEffect):
+                        texture_effect = lastchild
+                    break
+                lastchild = child
+            if not texture_effect:
+                for effect in parent_node.effects:
+                    if isinstance(effect, NifFormat.NiTextureEffect):
+                        texture_effect = effect
+                        break
+
+        if texture_effect and texture_effect.source_texture:
+            b_env_node = b_mat.node_tree.nodes.new('ShaderNodeTexEnvironment')
+            b_env_node.name = 'Environment Map'
+            b_env_node.label = 'Environment Map'
+            img = TextureLoader().import_texture_source(texture_effect.source_texture)
+            if img:
+                b_env_node.image = img
 
         self.nodes_wrapper.connect_to_output(b_mesh.vertex_colors)
 

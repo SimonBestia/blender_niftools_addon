@@ -1,61 +1,15 @@
-Version v0.1.1
+Version v0.0.15 (SIMONBESTIA's CRAPPY VIBECODED BRANCH FOR BULLY FIXES)
 ===============
 
-- #591 Expansion of DisplayList processing and small fixes.
-    - Rigged meshes with DisplayLists will now have functional weights.
-    - 4-component normals are now handled correctly for DisplayLists.
-    - Added multiple UV layer support for DisplayLists.
-    - Rudimentary support for Fallout NV (Fallout New Vegas) by treating it the same as Fallout 3.
-    - Fixes #582
-    - Fixes #589
-    - Fix for animation support for Shin Megami Tensei: Imagine.
-    - Fixes #584
-    - Fixes #554 and overhauls/isolates the way the nif geometry data is obtained during export.
-    - Added option for splitting on tangents (did not happen before). Needs to be disabled for Oblivion head meshes.
-    - Warn rather than silent fail during egm import.
-    - Export: Move UV coordinates that are completely in another UV tile to the 0-1 tile.
-    - Added support for weighted Fallout 4 meshes, fixing #598
-    - Fixes #599
-    - Fixes #600
-    - Add exported tangents to Bully SE.
-    - Always return copy for get_object_bind to prevent accidental modification.
-    - Added support for basic (unweighted) Skyrim SE export.
-    - Change generated module name from generated to nifgen to prevent collision with cobra-tools.
-- #592 Update to documentation
-- #593 Supported export for Sid Meier's Pirates!.
+Fixes of this branch:
+- Model texture flags are no longer reset to 0 from 12800 after export
+- NiStringExtraData are preserved on export
+- Material names should no longer screw with texture assignments upon import
+- Cube maps should no longer be lost
+- NiSpecular Property should no longer be defaulted to 1 for every mesh after export (done by stripping it to meshes lacking a _s texture. Beware of rare naming inconsistencies thoug)
 
-Version v0.1.0
-===============
-
-- #576 Updates to documentation, changelog and makezip.bat (copies over generated folder from cobra-tools).
-- #572 Extra development of NiMesh import and some fixes
-    - Fix to BSInvMarker rotation export.
-    - Fix for bs_data_flags setting in export - now also applied to other games where applicable, not just Skyrim.
-    - Fix to transform on packed collision vertices export.
-    - Adjust StringProperty arguments to prevent crash in Blender 3.2 or lower.
-    - Fix to mistake in BhkMalleableConstraint info import.
-    - Added processing of regions to NiMesh bone import.
-    - Basic DisplayList import (NiMesh with a specific type of datastream, which encodes the geometry). Bone weights for this type of nif are still unimplemented.
-- #543 Use "Color" type for "InvertY" group
-- #541 NiMesh import and updates for newer xml
-    - Nif file glob now partially dependent on xml.
-    - Support for NiMesh import (except those using DisplayList).
-    - Support for BSDynamicTriShape import.
-    - Update to Object properties ui (now only show relevant properties)
-    - Closes #533 "Unknown block type BSDynamicTriShape".
-    - Closes #421 "Can't import catherine classic .nif files."
-- #535 Pyffi overhaul
-    - Change kf and nif import to make use of the new statically generated nif reading/writing library.
-    - Added support for SSE mesh import.
-    - Closes #521.
-- #526 Allow setting armature axis manually
-- #524 int cast in add_dummy_markers to comply with blender 3.1+'s python and check for interpolator attribute on controller before accessing it.
-- #506 Speedup anim import & various other fixes
-    - Closes #180
-    - Closes #495
-    - Closes #500
-    - Closes #510
-    - Closes #517
+Known BULLY Issues:
+- NiStencilPropery may be reset to 0 on export?
 
 Version v0.0.14
 ===============

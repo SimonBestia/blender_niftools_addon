@@ -39,8 +39,8 @@
 
 
 import bpy
-import nifgen.spells.nif.fix
-from nifgen.formats.nif import classes as NifClasses
+import pyffi.spells.nif.fix
+from pyffi.formats.nif import NifFormat
 
 import io_scene_niftools.utils.logging
 from io_scene_niftools.file_io.nif import NifFile
@@ -60,6 +60,7 @@ from io_scene_niftools.modules.nif_import.property.object import ObjectProperty
 
 from io_scene_niftools.nif_common import NifCommon
 from io_scene_niftools.utils import math
+from io_scene_niftools.utils.blocks import safe_decode
 from io_scene_niftools.utils.singleton import NifOp, NifData
 from io_scene_niftools.utils.logging import NifLog, NifError
 
@@ -99,11 +100,11 @@ class NifImport(NifCommon):
 
             # merge skeleton roots and transform geometry into the rest pose
             if NifOp.props.merge_skeleton_roots:
-                nifgen.spells.nif.fix.SpellMergeSkeletonRoots(data=NifData.data).recurse()
+                pyffi.spells.nif.fix.SpellMergeSkeletonRoots(data=NifData.data).recurse()
             if NifOp.props.send_geoms_to_bind_pos:
-                nifgen.spells.nif.fix.SpellSendGeometriesToBindPosition(data=NifData.data).recurse()
+                pyffi.spells.nif.fix.SpellSendGeometriesToBindPosition(data=NifData.data).recurse()
             if NifOp.props.send_detached_geoms_to_node_pos:
-                nifgen.spells.nif.fix.SpellSendDetachedGeometriesToNodePosition(data=NifData.data).recurse()
+                pyffi.spells.nif.fix.SpellSendDetachedGeometriesToNodePosition(data=NifData.data).recurse()
             if NifOp.props.apply_skin_deformation:
                 VertexGroup.apply_skin_deformation(NifData.data)
 
@@ -114,7 +115,7 @@ class NifImport(NifCommon):
             # import all root blocks
             for root in NifData.data.roots:
                 # root hack for corrupt better bodies meshes and remove geometry from better bodies on skeleton import
-                for b in (b for b in root.tree(block_type=NifClasses.NiGeometry) if b.is_skin()):
+                for b in (b for b in root.tree(block_type=NifFormat.NiGeometry) if b.is_skin()):
                     # check if root belongs to the children list of the skeleton root
                     if root in [c for c in b.skin_instance.skeleton_root.children]:
                         # fix parenting and update transform accordingly
@@ -144,18 +145,18 @@ class NifImport(NifCommon):
     def import_root(self, root_block):
         """Main import function."""
         # check that this is not a kf file
-        if isinstance(root_block, (NifClasses.NiSequence, NifClasses.NiSequenceStreamHelper)):
+        if isinstance(root_block, (NifFormat.NiSequence, NifFormat.NiSequenceStreamHelper)):
             raise io_scene_niftools.utils.logging.NifError("Use the KF import operator to load KF files.")
 
         # divinity 2: handle CStreamableAssetData
-        if isinstance(root_block, NifClasses.CStreamableAssetData):
+        if isinstance(root_block, NifFormat.CStreamableAssetData):
             root_block = root_block.root
 
         # mark armature nodes and bones
         self.armaturehelper.check_for_skin(root_block)
 
         # read the NIF tree
-        if isinstance(root_block, NifClasses.NiNode) or self.objecthelper.has_geometry(root_block):
+        if isinstance(root_block, (NifFormat.NiNode, NifFormat.NiTriBasedGeom)):
             b_obj = self.import_branch(root_block)
             ObjectProperty().import_extra_datas(root_block, b_obj)
 
@@ -168,10 +169,10 @@ class NifImport(NifCommon):
                     self.objecthelper.remove_armature_modifier(b_child)
                     self.objecthelper.append_armature_modifier(b_child, b_obj)
 
-        elif isinstance(root_block, NifClasses.NiCamera):
+        elif isinstance(root_block, NifFormat.NiCamera):
             NifLog.warn('Skipped NiCamera root')
 
-        elif isinstance(root_block, NifClasses.NiPhysXProp):
+        elif isinstance(root_block, NifFormat.NiPhysXProp):
             NifLog.warn('Skipped NiPhysXProp root')
 
         else:
@@ -180,9 +181,9 @@ class NifImport(NifCommon):
     def import_collision(self, n_node):
         """ Imports a NiNode's collision_object, if present"""
         if n_node.collision_object:
-            if isinstance(n_node.collision_object, NifClasses.BhkNiCollisionObject):
+            if isinstance(n_node.collision_object, NifFormat.bhkNiCollisionObject):
                 return self.bhkhelper.import_bhk_shape(n_node.collision_object.body)
-            elif isinstance(n_node.collision_object, NifClasses.NiCollisionData):
+            elif isinstance(n_node.collision_object, NifFormat.NiCollisionData):
                 return self.boundhelper.import_bounding_volume(n_node.collision_object.bounding_volume)
         return []
 
@@ -195,11 +196,11 @@ class NifImport(NifCommon):
         if not n_block:
             return None
 
-        NifLog.info(f"Importing data for block '{n_block.name}'")
-        if self.objecthelper.has_geometry(n_block) and NifOp.props.process != "SKELETON_ONLY":
+        NifLog.info(f"Importing data for block '{safe_decode(n_block.name)}'")
+        if isinstance(n_block, NifFormat.NiTriBasedGeom) and NifOp.props.process != "SKELETON_ONLY":
             return self.objecthelper.import_geometry_object(b_armature, n_block)
 
-        elif isinstance(n_block, NifClasses.NiNode):
+        elif isinstance(n_block, NifFormat.NiNode):
             # import object
             if self.armaturehelper.is_armature_root(n_block):
                 # all bones in the tree are also imported by import_armature
@@ -222,10 +223,11 @@ class NifImport(NifCommon):
                 else:
                     # this is a fallback for a weird bug, when a node is child of a NiLodNode in a skeletal nif
                     b_obj = self.objecthelper.create_b_obj(n_block, None, name=n_name)
+                b_obj.niftools.flags = n_block.flags
+
             else:
                 # import as an empty
                 b_obj = NiTypes.import_empty(n_block)
-            b_obj.niftools.flags = n_block.flags
 
             # find children
             b_children = []
@@ -247,6 +249,7 @@ class NifImport(NifCommon):
             NiTypes.import_root_collision(n_block, b_obj)
             NiTypes.import_billboard(n_block, b_obj)
             NiTypes.import_range_lod_data(n_block, b_obj, b_children)
+            ObjectProperty().import_generic_extra_datas(n_block, b_obj)
 
             if NifOp.props.animation:
                 self.transform_anim.import_controller_manager(n_block, b_obj, b_armature)

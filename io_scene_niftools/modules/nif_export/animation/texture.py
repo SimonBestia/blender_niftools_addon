@@ -84,7 +84,8 @@ class TextureAnimation(Animation):
             # create a NiSourceTexture for each n_flip
             tex = TextureWriter.export_source_texture(texture, t)
             n_flip.num_sources += 1
-            n_flip.sources.append(tex)
+            n_flip.sources.update_size()
+            n_flip.sources[n_flip.num_sources - 1] = tex
             count += 1
         if count < 2:
             raise io_scene_niftools.utils.logging.NifError(f"Error in Texture Flip buffer '{fliptxt.name}': must define at least two textures")

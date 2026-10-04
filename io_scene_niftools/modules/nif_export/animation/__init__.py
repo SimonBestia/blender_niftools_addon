@@ -39,7 +39,7 @@
 from abc import ABC
 
 import bpy
-from nifgen.formats.nif import classes as NifClasses
+from pyffi.formats.nif import NifFormat
 
 from io_scene_niftools.modules.nif_export.block_registry import block_store
 from io_scene_niftools.utils.singleton import NifOp, NifData
@@ -53,11 +53,8 @@ class Animation(ABC):
 
     def set_flags_and_timing(self, kfc, exp_fcurves, start_frame=None, stop_frame=None):
         # fill in the non-trivial values
-        kfc.flags._value = 8  # active
+        kfc.flags = 8  # active
         kfc.flags |= self.get_flags_from_fcurves(exp_fcurves)
-        if bpy.context.scene.niftools_scene.game == 'SID_MEIER_S_PIRATES':
-            # Sid Meier's Pirates! want the manager_controlled flag set
-            kfc.flags.manager_controlled = True
         kfc.frequency = 1.0
         kfc.phase = 0.0
         if not start_frame and not stop_frame:
@@ -96,14 +93,14 @@ class Animation(ABC):
         """find all nodes and relevant controllers"""
         node_kfctrls = {}
         for node in nodes:
-            if not isinstance(node, NifClasses.NiAVObject):
+            if not isinstance(node, NifFormat.NiAVObject):
                 continue
             # get list of all controllers for this node
             ctrls = node.get_controllers()
             for ctrl in ctrls:
                 if bpy.context.scene.niftools_scene.game == 'MORROWIND':
                     # morrowind: only keyframe controllers
-                    if not isinstance(ctrl, NifClasses.NiKeyframeController):
+                    if not isinstance(ctrl, NifFormat.NiKeyframeController):
                         continue
                 if node not in node_kfctrls:
                     node_kfctrls[node] = []
@@ -135,14 +132,14 @@ class Animation(ABC):
             # link interpolator from the controller
             n_kfc.interpolator = n_kfi
         # if parent is a node, attach controller to that node
-        if isinstance(parent_block, NifClasses.NiNode):
+        if isinstance(parent_block, NifFormat.NiNode):
             parent_block.add_controller(n_kfc)
             if n_kfi:
                 # set interpolator default data
                 n_kfi.scale, n_kfi.rotation, n_kfi.translation = parent_block.get_transform().get_scale_quat_translation()
 
         # else ControllerSequence, so create a link
-        elif isinstance(parent_block, NifClasses.NiControllerSequence):
+        elif isinstance(parent_block, NifFormat.NiControllerSequence):
             controlled_block = parent_block.add_controlled_block()
             controlled_block.priority = priority
             # todo - pyffi adds the names to the NiStringPalette, but it creates one per controller link...
@@ -162,7 +159,7 @@ class Animation(ABC):
                 controlled_block.controller_type = "NiTransformController"
                 # get the parent's string palette
                 if not parent_block.string_palette:
-                    parent_block.string_palette = NifClasses.NiStringPalette(NifData.data)
+                    parent_block.string_palette = NifFormat.NiStringPalette()
                 # assign string palette to controller
                 controlled_block.string_palette = parent_block.string_palette
                 # add the strings and store their offsets
@@ -170,7 +167,7 @@ class Animation(ABC):
                 controlled_block.node_name_offset = palette.add_string(controlled_block.node_name)
                 controlled_block.controller_type_offset = palette.add_string(controlled_block.controller_type)
         # morrowind style
-        elif isinstance(parent_block, NifClasses.NiSequenceStreamHelper):
+        elif isinstance(parent_block, NifFormat.NiSequenceStreamHelper):
             # create node reference by name
             nodename_extra = block_store.create_block("NiStringExtraData")
             nodename_extra.bytes_remaining = len(target_name) + 4
@@ -187,14 +184,14 @@ class Animation(ABC):
     @staticmethod
     def get_n_interp_from_b_interp(b_ipol):
         if b_ipol == "LINEAR":
-            return NifClasses.KeyType.LINEAR_KEY
+            return NifFormat.KeyType.LINEAR_KEY
         elif b_ipol == "BEZIER":
-            return NifClasses.KeyType.QUADRATIC_KEY
+            return NifFormat.KeyType.QUADRATIC_KEY
         elif b_ipol == "CONSTANT":
-            return NifClasses.KeyType.CONST_KEY
+            return NifFormat.KeyType.CONST_KEY
 
         NifLog.warn(f"Unsupported interpolation mode ({b_ipol}) in blend, using quadratic/bezier.")
-        return NifClasses.KeyType.QUADRATIC_KEY
+        return NifFormat.KeyType.QUADRATIC_KEY
     
     def add_dummy_markers(self, b_action):
         # if we exported animations, but no animation groups are defined,
@@ -204,4 +201,4 @@ class Animation(ABC):
             NifLog.info("Defining default action pose markers.")
             for frame, text in zip(b_action.frame_range, ("Idle: Start/Idle: Loop Start", "Idle: Loop Stop/Idle: Stop")):
                 marker = b_action.pose_markers.new(text)
-                marker.frame = int(frame)
+                marker.frame = frame

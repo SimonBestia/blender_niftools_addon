@@ -37,12 +37,11 @@
 #
 # ***** END LICENSE BLOCK *****
 import bpy
-from nifgen.formats.nif import classes as NifClasses
+from pyffi.formats.nif import NifFormat
 
 from io_scene_niftools.modules.nif_export.block_registry import block_store
 from io_scene_niftools.modules.nif_export.property.texture import TextureSlotManager, TextureWriter
 from io_scene_niftools.utils.logging import NifLog
-from io_scene_niftools.utils.singleton import NifData
 
 
 class NiTextureProp(TextureSlotManager):
@@ -85,18 +84,22 @@ class NiTextureProp(TextureSlotManager):
 
         self.determine_texture_types(b_mat)
 
-        texprop = NifClasses.NiTexturingProperty(NifData.data)
+        texprop = NifFormat.NiTexturingProperty()
 
-        texprop.flags = flags
+        if bpy.context.scene.niftools_scene.game == 'BULLY_SE':
+            texprop.flags = 0x0005
+            texprop.texture_count = 9
+        else:
+            texprop.flags = flags
+            texprop.texture_count = 7
         texprop.apply_mode = applymode
-        texprop.texture_count = 7
 
         self.export_texture_shader_effect(texprop)
         self.export_nitextureprop_tex_descs(texprop)
 
         # search for duplicate
         for n_block in block_store.block_to_obj:
-            if isinstance(n_block, NifClasses.NiTexturingProperty) and n_block.get_hash() == texprop.get_hash():
+            if isinstance(n_block, NifFormat.NiTexturingProperty) and n_block.get_hash() == texprop.get_hash():
                 return n_block
 
         # no texturing property with given settings found, so use and register
@@ -117,6 +120,14 @@ class NiTextureProp(TextureSlotManager):
                 # set uv index and source texture to the texdesc
                 texdesc.uv_set = uv_index
                 texdesc.source = TextureWriter.export_source_texture(b_texture_node)
+
+                clamp_mode = 3 # WRAP_S_WRAP_T
+                if hasattr(b_texture_node, "extension"):
+                    if b_texture_node.extension == 'CLIP' or b_texture_node.extension == 'EXTEND':
+                        clamp_mode = 0 # CLAMP_S_CLAMP_T
+
+                if hasattr(texdesc, "flags"):
+                    texdesc.flags = (clamp_mode << 12) | 0x0200
 
         # TODO [animation] FIXME Heirarchy
         # self.texture_anim.export_flip_controller(fliptxt, self.base_mtex.texture, texprop, 0)
@@ -163,21 +174,37 @@ class NiTextureProp(TextureSlotManager):
 
     def export_texture_effect(self, b_texture_node=None):
         """Export a texture effect block from material texture mtex (MTex, not Texture)."""
-        texeff = NifClasses.NiTextureEffect(NifData.data)
-        texeff.flags = 4
+        texeff = NifFormat.NiTextureEffect()
+        texeff.flags = 16
+        texeff.switch_state = True
         texeff.rotation.set_identity()
         texeff.scale = 1.0
-        texeff.model_projection_matrix.set_identity()
-        texeff.texture_filtering = NifClasses.TexFilterMode.FILTER_TRILERP
-        texeff.texture_clamping = NifClasses.TexClampMode.WRAP_S_WRAP_T
-        texeff.texture_type = NifClasses.EffectType.EFFECT_ENVIRONMENT_MAP
-        texeff.coordinate_generation_type = NifClasses.CoordGenType.CG_SPHERE_MAP
+        
+        # Swap Y and Z axes for model_projection_matrix
+        texeff.model_projection_matrix.m_11 = 1.0
+        texeff.model_projection_matrix.m_12 = 0.0
+        texeff.model_projection_matrix.m_13 = 0.0
+        
+        texeff.model_projection_matrix.m_21 = 0.0
+        texeff.model_projection_matrix.m_22 = 0.0
+        texeff.model_projection_matrix.m_23 = 1.0
+        
+        texeff.model_projection_matrix.m_31 = 0.0
+        texeff.model_projection_matrix.m_32 = 1.0
+        texeff.model_projection_matrix.m_33 = 0.0
+        
+        texeff.texture_filtering = NifFormat.TexFilterMode.FILTER_TRILERP
+        texeff.texture_clamping = NifFormat.TexClampMode.CLAMP_S_CLAMP_T
+        texeff.texture_type = NifFormat.EffectType.EFFECT_ENVIRONMENT_MAP
+        texeff.coordinate_generation_type = NifFormat.CoordGenType.CG_SPECULAR_CUBE_MAP
         if b_texture_node:
-            texeff.source_texture = TextureWriter.export_source_texture(b_texture_node.texture)
+            src = TextureWriter.export_source_texture(b_texture_node, is_cube_map=True)
+            if hasattr(src, "pixel_layout"):
+                src.pixel_layout = 3 # PIX_LAY_COMPRESSED
+            texeff.source_texture = src
             if bpy.context.scene.niftools_scene.game == 'MORROWIND':
                 texeff.num_affected_node_list_pointers += 1
-                # added value doesn't matter since it apparently gets automagically updated in engine
-                texeff.affected_node_list_pointers.append(0)
+                texeff.affected_node_list_pointers.update_size()
         texeff.unknown_vector.x = 1.0
         return block_store.register_block(texeff)
 
@@ -189,7 +216,7 @@ class NiTextureProp(TextureSlotManager):
             # sid meier's railroads:
             # some textures end up in the shader texture list there are 5 slots available, so set them up
             tex_prop.num_shader_textures = 5
-            tex_prop.reset_field("shader_textures")
+            tex_prop.shader_textures.update_size()
             for mapindex, shadertexdesc in enumerate(tex_prop.shader_textures):
                 # set default values
                 shadertexdesc.is_used = False
@@ -207,7 +234,7 @@ class NiTextureProp(TextureSlotManager):
         elif bpy.context.scene.niftools_scene.game == 'CIVILIZATION_IV':
             # some textures end up in the shader texture list there are 4 slots available, so set them up
             tex_prop.num_shader_textures = 4
-            tex_prop.reset_field("shader_textures")
+            tex_prop.shader_textures.update_size()
             for mapindex, shadertexdesc in enumerate(tex_prop.shader_textures):
                 # set default values
                 shadertexdesc.is_used = False
@@ -222,11 +249,11 @@ class NiTextureProp(TextureSlotManager):
     @staticmethod
     def get_n_apply_mode_from_b_blend_type(b_blend_type):
         if b_blend_type == "LIGHTEN":
-            return NifClasses.ApplyMode.APPLY_HILIGHT
+            return NifFormat.ApplyMode.APPLY_HILIGHT
         elif b_blend_type == "MULTIPLY":
-            return NifClasses.ApplyMode.APPLY_HILIGHT2
+            return NifFormat.ApplyMode.APPLY_HILIGHT2
         elif b_blend_type == "MIX":
-            return NifClasses.ApplyMode.APPLY_MODULATE
+            return NifFormat.ApplyMode.APPLY_MODULATE
 
         NifLog.warn(f"Unsupported blend type ({b_blend_type}) in material, using apply mode APPLY_MODULATE")
-        return NifClasses.ApplyMode.APPLY_MODULATE
+        return NifFormat.ApplyMode.APPLY_MODULATE

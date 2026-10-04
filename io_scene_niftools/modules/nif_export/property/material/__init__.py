@@ -39,11 +39,11 @@
 
 
 import bpy
-from nifgen.formats.nif import classes as NifClasses
+from pyffi.formats.nif import NifFormat
 
 from io_scene_niftools.modules.nif_export.animation.material import MaterialAnimation
 from io_scene_niftools.modules.nif_export.block_registry import block_store
-from io_scene_niftools.utils.singleton import NifOp, NifData
+from io_scene_niftools.utils.singleton import NifOp
 from io_scene_niftools.utils.logging import NifLog
 
 EXPORT_OPTIMIZE_MATERIALS = True
@@ -58,18 +58,20 @@ class MaterialProp:
         """Return existing material property with given settings, or create
         a new one if a material property with these settings is not found."""
         # don't export material properties for these games
-        if bpy.context.scene.niftools_scene.is_skyrim():
+        if bpy.context.scene.niftools_scene.game in ('SKYRIM', ):
             return
         name = block_store.get_full_name(b_mat)
+        import re
+        name = re.sub(r'\.\d{3}$', '', name)
         # create n_block
-        n_mat_prop = NifClasses.NiMaterialProperty(NifData.data)
+        n_mat_prop = NifFormat.NiMaterialProperty()
 
         # list which determines whether the material name is relevant or not  only for particular names this holds,
         # such as EnvMap2 by default, the material name does not affect rendering
         specialnames = ("EnvMap2", "EnvMap", "skin", "Hair", "dynalpha", "HideSecret", "Lava")
 
         # hack to preserve EnvMap2, skinm, ... named blocks (even if they got renamed to EnvMap2.xxx or skin.xxx on import)
-        if bpy.context.scene.niftools_scene.is_bs():
+        if bpy.context.scene.niftools_scene.game in ('OBLIVION', 'FALLOUT_3', 'SKYRIM'):
             for specialname in specialnames:
                 if name.lower() == specialname.lower() or name.lower().startswith(specialname.lower() + "."):
                     if name != specialname:
@@ -92,7 +94,23 @@ class MaterialProp:
         # todo [material] some colors in the b2.8 api allow rgb access, others don't - why??
         # diffuse mat
         n_mat_prop.diffuse_color.r, n_mat_prop.diffuse_color.g, n_mat_prop.diffuse_color.b, _ = b_mat.diffuse_color
-        n_mat_prop.specular_color.r, n_mat_prop.specular_color.g, n_mat_prop.specular_color.b = b_mat.specular_color
+        
+        spec_r, spec_g, spec_b = b_mat.specular_color
+        if b_mat.use_nodes and b_mat.node_tree:
+            for node in b_mat.node_tree.nodes:
+                if node.type == 'BSDF_PRINCIPLED':
+                    spec_socket = node.inputs.get('Specular')
+                    if spec_socket:
+                        if spec_socket.is_linked:
+                            intensity = 1.0
+                        else:
+                            intensity = spec_socket.default_value
+                        spec_r *= intensity
+                        spec_g *= intensity
+                        spec_b *= intensity
+                    break
+        
+        n_mat_prop.specular_color.r, n_mat_prop.specular_color.g, n_mat_prop.specular_color.b = spec_r, spec_g, spec_b
 
         emissive = b_mat.niftools.emissive_color
         n_mat_prop.emissive_color.r = emissive.r
@@ -108,7 +126,7 @@ class MaterialProp:
         # search for duplicate
         # (ignore the name string as sometimes import needs to create different materials even when NiMaterialProperty is the same)
         for n_block in block_store.block_to_obj:
-            if not isinstance(n_block, NifClasses.NiMaterialProperty):
+            if not isinstance(n_block, NifFormat.NiMaterialProperty):
                 continue
 
             # when optimization is enabled, ignore material name
@@ -118,6 +136,8 @@ class MaterialProp:
                 ignore_strings = False
 
             # check hash
+            if bpy.context.scene.niftools_scene.game == 'BULLY_SE':
+                continue
             first_index = 1 if ignore_strings else 0
             if n_block.get_hash()[first_index:] == n_mat_prop.get_hash()[first_index:]:
                 NifLog.warn(f"Merging materials '{n_mat_prop.name}' and '{n_block.name}' (they are identical in nif)")

@@ -172,16 +172,51 @@ class TextureSlotManager:
             NifLog.debug(f"Found node {b_texture_node.name} of type {shown_label}")
 
             # go over all slots
+            matched_slot = None
             for slot_name in self.slots.keys():
                 if slot_name in shown_label:
-                    # slot has already been populated
-                    if self.slots[slot_name]:
-                        raise NifError(f"Multiple {slot_name} textures in material '{b_mat.name}''.\n"
-                                       f"Make sure there is only one texture node labeled as '{slot_name}'")
-                    # it's a new slot so store it
-                    self.slots[slot_name] = b_texture_node
+                    matched_slot = slot_name
                     break
-            # unsupported texture type
+            
+            # fallback: guess by common suffixes
+            if not matched_slot and b_texture_node.image:
+                name_lower = b_texture_node.image.name.lower()
+                if name_lower.endswith("_d") or "_d." in name_lower:
+                    matched_slot = "Base"
+                elif name_lower.endswith("_n") or "_n." in name_lower or "_n_msn." in name_lower or name_lower.endswith("_m") or "_m." in name_lower:
+                    matched_slot = "Normal"
+                elif name_lower.endswith("_s") or "_s." in name_lower:
+                    matched_slot = "Gloss"
+                elif name_lower.endswith("_g") or "_g." in name_lower:
+                    matched_slot = "Glow"
+
+            # fallback: guess by node socket connections
+            if not matched_slot:
+                try:
+                    for link in b_texture_node.outputs[0].links:
+                        socket_name = link.to_socket.name
+                        if socket_name in ('Base Color', 'Color'):
+                            matched_slot = "Base"
+                            break
+                        elif socket_name in ('Specular', 'Roughness'):
+                            matched_slot = "Gloss"
+                            break
+                        elif socket_name == 'Normal':
+                            matched_slot = "Normal"
+                            break
+                        elif socket_name == 'Emission':
+                            matched_slot = "Glow"
+                            break
+                except:
+                    pass
+
+            if matched_slot:
+                # slot has already been populated
+                if self.slots[matched_slot]:
+                    raise NifError(f"Multiple {matched_slot} textures in material '{b_mat.name}'.\n"
+                                   f"Make sure there is only one texture node labeled as '{matched_slot}'")
+                # it's a new slot so store it
+                self.slots[matched_slot] = b_texture_node
             else:
                 raise NifError(f"Do not know how to export texture node '{b_texture_node.name}' in material '{b_mat.name}' with label '{shown_label}'."
                                f"Delete it or change its label.")

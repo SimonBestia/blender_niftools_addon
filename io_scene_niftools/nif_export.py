@@ -41,7 +41,8 @@
 import os.path
 
 import bpy
-from nifgen.formats.nif import classes as NifClasses
+import pyffi.spells.nif.fix
+from pyffi.formats.nif import NifFormat
 
 from io_scene_niftools.modules.nif_export.animation.transform import TransformAnimation
 from io_scene_niftools.modules.nif_export.constraint import Constraint
@@ -88,7 +89,7 @@ class NifExport(NifCommon):
         try:  # catch export errors
 
             # protect against null nif versions
-            if bpy.context.scene.niftools_scene.game == 'UNKNOWN':
+            if bpy.context.scene.niftools_scene.game == 'NONE':
                 raise NifError("You have not selected a game. Please select a game and"
                                 " nif version in the scene tab.")
 
@@ -143,7 +144,7 @@ class NifExport(NifCommon):
                 # if we are in that situation, add a trivial keyframe animation
                 has_keyframecontrollers = False
                 for block in block_store.block_to_obj:
-                    if isinstance(block, NifClasses.NiKeyframeController):
+                    if isinstance(block, NifFormat.NiKeyframeController):
                         has_keyframecontrollers = True
                         break
                 if (not has_keyframecontrollers) and (not NifOp.props.bs_animation_node):
@@ -153,10 +154,10 @@ class NifExport(NifCommon):
 
                 if NifOp.props.bs_animation_node:
                     for block in block_store.block_to_obj:
-                        if isinstance(block, NifClasses.NiNode):
+                        if isinstance(block, NifFormat.NiNode):
                             # if any of the shape children has a controller or if the ninode has a controller convert its type
-                            if block.controller or any(child.controller for child in block.children if isinstance(child, NifClasses.NiGeometry)):
-                                new_block = NifClasses.NiBSAnimationNode(NifData.data).deepcopy(block)
+                            if block.controller or any(child.controller for child in block.children if isinstance(child, NifFormat.NiGeometry)):
+                                new_block = NifFormat.NiBSAnimationNode().deepcopy(block)
                                 # have to change flags to 42 to make it work
                                 new_block.flags = 42
                                 root_block.replace_global_node(block, new_block)
@@ -164,15 +165,15 @@ class NifExport(NifCommon):
                                     root_block = new_block
 
             # oblivion skeleton export: check that all bones have a transform controller and transform interpolator
-            if bpy.context.scene.niftools_scene.is_bs() and filebase.lower() in ('skeleton', 'skeletonbeast'):
+            if bpy.context.scene.niftools_scene.game in ('OBLIVION', 'FALLOUT_3', 'SKYRIM') and filebase.lower() in ('skeleton', 'skeletonbeast'):
                 self.transform_anim.add_dummy_controllers()
 
             # bhkConvexVerticesShape of children of bhkListShapes need an extra bhkConvexTransformShape (see issue #3308638, reported by Koniption)
             # note: block_store.block_to_obj changes during iteration, so need list copy
             for block in list(block_store.block_to_obj.keys()):
-                if isinstance(block, NifClasses.BhkListShape):
+                if isinstance(block, NifFormat.bhkListShape):
                     for i, sub_shape in enumerate(block.sub_shapes):
-                        if isinstance(sub_shape, NifClasses.BhkConvexVerticesShape):
+                        if isinstance(sub_shape, NifFormat.bhkConvexVerticesShape):
                             coltf = block_store.create_block("bhkConvexTransformShape")
                             coltf.material = sub_shape.material
                             coltf.unknown_float_1 = 0.1
@@ -226,16 +227,16 @@ class NifExport(NifCommon):
             # apply scale
             data.roots = [root_block]
             scale_correction = bpy.context.scene.niftools_scene.scale_correction
-            if abs(1 - scale_correction) > NifOp.props.epsilon:
-                self.apply_scale(data, 1 / scale_correction)
+            if abs(scale_correction) > NifOp.props.epsilon:
+                self.apply_scale(data, round(1 / NifOp.props.scale_correction))
                 # also scale egm
                 if EGMData.data:
                     EGMData.data.apply_scale(1 / scale_correction)
 
             # generate mopps (must be done after applying scale!)
-            if bpy.context.scene.niftools_scene.is_bs():
+            if bpy.context.scene.niftools_scene.game in ('OBLIVION', 'FALLOUT_3', 'SKYRIM'):
                 for block in block_store.block_to_obj:
-                    if isinstance(block, NifClasses.BhkMoppBvTreeShape):
+                    if isinstance(block, NifFormat.bhkMoppBvTreeShape):
                         NifLog.info("Generating mopp...")
                         block.update_mopp()
                         # print "=== DEBUG: MOPP TREE ==="
@@ -268,7 +269,6 @@ class NifExport(NifCommon):
             elif bpy.context.scene.niftools_scene.game == 'HOWLING_SWORD':
                 data.modification = "jmihs1"
 
-            data.validate()
             with open(niffile, "wb") as stream:
                 data.write(stream)
 
