@@ -42,7 +42,7 @@ import bpy
 
 import pyffi.spells.nif.fix
 
-from io_scene_niftools.file_io.kf import KFFile
+
 from io_scene_niftools.modules.nif_export import armature
 from io_scene_niftools.modules.nif_export.animation.transform import TransformAnimation
 from io_scene_niftools.nif_common import NifCommon

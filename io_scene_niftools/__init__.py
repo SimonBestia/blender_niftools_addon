@@ -67,13 +67,14 @@ def locate_dependencies():
     current_dir = os.path.dirname(__file__)
     _dependencies_path = os.path.join(current_dir, "dependencies")
     if _dependencies_path not in sys.path:
-        sys.path.append(_dependencies_path)
+        sys.path.insert(0, _dependencies_path)
     del _dependencies_path
 
     with open(os.path.join(current_dir, "VERSION.txt")) as version:
         NifLog.info(f"Loading: Blender Niftools Addon: {version.read()}")
         import pyffi
-        NifLog.info(f"Loading: PyFFi: {pyffi.__version__}")
+        pyffi_version = getattr(pyffi, '__version__', 'unknown')
+        NifLog.info(f"Loading: PyFFi: {pyffi_version}")
 
 
 locate_dependencies()

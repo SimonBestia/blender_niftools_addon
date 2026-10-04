@@ -12,6 +12,7 @@ set /p VERSION=<%ROOT%\io_scene_niftools\VERSION.txt
 :: Abuse for loop to execute and store command output
 for /f %%i in ('git rev-parse --short HEAD') do set HASH=%%i
 for /f %%i in ('echo %date%') do set DATE=%%i
+set "DATE=%DATE:/=-%"
 set "ZIP_NAME=%NAME%-%VERSION%-%DATE%-%HASH%"
 set PYFFI_VERSION="2.2.4.dev3"
 set DEPS="io_scene_niftools\dependencies"
@@ -24,7 +25,7 @@ mkdir io_scene_niftools
 xcopy /s "%ROOT%\io_scene_niftools" io_scene_niftools
 mkdir "%DEPS%"
 
-python -m pip install "PyFFI==%PYFFI_VERSION%" --target="%DEPS%"
+python -m pip install "PyFFI==%PYFFI_VERSION%" --target="%DEPS%" --upgrade
 
 xcopy "%GENERATED_FOLDER%" "%DEPS%\nifgen" /s /q /i
 
@@ -39,13 +40,10 @@ for /d /r %%x in (*) do if "%%~nx" == "__pycache__" rd %%x /s /q
 popd
 
 set "COMMAND_FILE=%DIR%\zip.ps1"
-set "COMMAND_FILE=%COMMAND_FILE: =` %"
-
 set "SOURCE_DIR=%DIR%\temp\io_scene_niftools"
-set "SOURCE_DIR=%SOURCE_DIR: =` %"
-
 set "DESTINATION_DIR=%DIR%\%ZIP_NAME%.zip"
-set "DESTINATION_DIR=%DESTINATION_DIR: =` %"
 
-powershell -executionpolicy bypass -Command "%COMMAND_FILE%" -source "%SOURCE_DIR%" -destination "%DESTINATION_DIR%"
+powershell -executionpolicy bypass -File "%COMMAND_FILE%" -source "%SOURCE_DIR%" -destination "%DESTINATION_DIR%"
 rmdir /s /q "%DIR%\temp"
+
+pause
